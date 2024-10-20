@@ -233,6 +233,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
 
         if (DebugAdapter.terminal) {
             DebugAdapter.terminal.sendText('\u0003');
+            DebugAdapter.terminal.sendText('true');
             // DebugAdapter.terminal.dispose();
             // DebugAdapter.terminal = undefined;
         }
