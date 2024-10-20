@@ -153,7 +153,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
             DebugAdapter.terminal = vscode.window.createTerminal(this.session.name);
         }
         DebugAdapter.terminal.show();
-        DebugAdapter.terminal.sendText(`adb logcat -v color --pid=${pid}`);
+        DebugAdapter.terminal.sendText(`adb logcat -v raw -v color --pid=${pid}`);
 
         let config = this.session.configuration;
 
