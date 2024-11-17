@@ -20,7 +20,8 @@ export class DebugAdapterDescriptorFactory implements vscode.DebugAdapterDescrip
 class DebugAdapter extends debugadapter.LoggingDebugSession {
     private session: vscode.DebugSession;
     private childSessions: {[key: string]: vscode.DebugSession} = {};
-    private jdwpCleanup: (() => Promise<void>)|undefined;
+    private jdwpCleanup: (() => Promise<void>) | undefined;
+    private static terminal: vscode.Terminal | undefined;
 
     constructor(context: vscode.ExtensionContext, session: vscode.DebugSession) {
         super();
@@ -44,6 +45,12 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         // Terminate debug session if no child sessions are active
         if (!Object.keys(this.childSessions).length) {
             this.sendEvent(new debugadapter.TerminatedEvent());
+        }
+
+        if (DebugAdapter.terminal && debugSession.parentSession === undefined) {
+            DebugAdapter.terminal.sendText('\u0003');
+            // DebugAdapter.terminal.dispose();
+            // DebugAdapter.terminal = undefined;
         }
     };
 
@@ -140,6 +147,14 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     }
 
     private async resumeProcess(pid: string) {
+        if (!DebugAdapter.terminal || DebugAdapter.terminal.exitStatus !== undefined || DebugAdapter.terminal.name !== this.session.name) {
+            if (DebugAdapter.terminal && (DebugAdapter.terminal.exitStatus !== undefined || DebugAdapter.terminal.name !== this.session.name))
+                DebugAdapter.terminal.dispose();
+            DebugAdapter.terminal = vscode.window.createTerminal(this.session.name);
+        }
+        DebugAdapter.terminal.show();
+        DebugAdapter.terminal.sendText(`adb logcat -v color --pid=${pid}`);
+
         let config = this.session.configuration;
 
         if (config.resumeProcess) {
