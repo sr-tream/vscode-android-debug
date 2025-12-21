@@ -147,14 +147,30 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         if (!DebugAdapter.terminal || DebugAdapter.terminal.exitStatus !== undefined || DebugAdapter.terminal.name !== this.session.name) {
             if (DebugAdapter.terminal && (DebugAdapter.terminal.exitStatus !== undefined || DebugAdapter.terminal.name !== this.session.name))
                 DebugAdapter.terminal.dispose();
-            DebugAdapter.terminal = vscode.window.createTerminal(this.session.name);
+
+            const term: vscode.TerminalOptions = {
+                name: this.session.name,
+                shellPath: "sh",
+                shellArgs: ["--noprofile"],
+                hideFromUser: false,
+                iconPath: new vscode.ThemeIcon("debug")
+            };
+            DebugAdapter.terminal = vscode.window.createTerminal(term);
         } else
             DebugAdapter.terminal.sendText('\u0003');
         DebugAdapter.terminal.sendText(`adb -s ${config.target.udid} logcat -v raw -v color --pid=${pid} | uniq`);
         DebugAdapter.terminal.show();
 
-        if (!this.scrcpy)
-            this.scrcpy = vscode.window.createTerminal("ScrCpy");
+        if (!this.scrcpy) {
+            const term: vscode.TerminalOptions = {
+                name: "ScrCpy",
+                shellPath: "sh",
+                shellArgs: ["--noprofile"],
+                hideFromUser: true,
+                iconPath: new vscode.ThemeIcon("device-mobile")
+            };
+            this.scrcpy = vscode.window.createTerminal(term);
+        }
         else
             this.scrcpy.sendText('\u0003');
         this.scrcpy.sendText(`scrcpy -s ${config.target.udid} --capture-orientation=0`);
