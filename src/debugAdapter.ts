@@ -150,7 +150,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
             DebugAdapter.terminal = vscode.window.createTerminal(this.session.name);
         } else
             DebugAdapter.terminal.sendText('\u0003');
-        DebugAdapter.terminal.sendText(`adb -s ${config.target.udid} logcat -v raw -v color --pid=${pid}`);
+        DebugAdapter.terminal.sendText(`adb -s ${config.target.udid} logcat -v raw -v color --pid=${pid} | uniq`);
         DebugAdapter.terminal.show();
 
         if (!this.scrcpy)
