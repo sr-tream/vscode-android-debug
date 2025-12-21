@@ -22,6 +22,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     private childSessions: {[key: string]: vscode.DebugSession} = {};
     private jdwpCleanup: (() => Promise<void>) | undefined;
     private static terminal: vscode.Terminal | undefined;
+    private scrcpy: vscode.Terminal | undefined;
 
     constructor(context: vscode.ExtensionContext, session: vscode.DebugSession) {
         super();
@@ -45,12 +46,6 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         // Terminate debug session if no child sessions are active
         if (!Object.keys(this.childSessions).length) {
             this.sendEvent(new debugadapter.TerminatedEvent());
-        }
-
-        if (DebugAdapter.terminal && debugSession.parentSession === undefined) {
-            DebugAdapter.terminal.sendText('\u0003');
-            // DebugAdapter.terminal.dispose();
-            // DebugAdapter.terminal = undefined;
         }
     };
 
@@ -147,15 +142,19 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     }
 
     private async resumeProcess(pid: string) {
+        let config = this.session.configuration;
+
         if (!DebugAdapter.terminal || DebugAdapter.terminal.exitStatus !== undefined || DebugAdapter.terminal.name !== this.session.name) {
             if (DebugAdapter.terminal && (DebugAdapter.terminal.exitStatus !== undefined || DebugAdapter.terminal.name !== this.session.name))
                 DebugAdapter.terminal.dispose();
             DebugAdapter.terminal = vscode.window.createTerminal(this.session.name);
         }
+        DebugAdapter.terminal.sendText(`adb -s ${config.target.udid} logcat -v raw -v color --pid=${pid}`);
         DebugAdapter.terminal.show();
-        DebugAdapter.terminal.sendText(`adb logcat -v raw -v color --pid=${pid}`);
 
-        let config = this.session.configuration;
+        if (!this.scrcpy)
+            this.scrcpy = vscode.window.createTerminal("ScrCpy");
+        this.scrcpy.sendText(`scrcpy -s ${config.target.udid} --lock-video-orientation=1`);
 
         if (config.resumeProcess) {
             try {
@@ -231,6 +230,18 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
 
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request | undefined): Promise<void> {
         await Promise.all(Object.values(this.childSessions).map(async (s) => await vscode.debug.stopDebugging(s)));
+
+        if (DebugAdapter.terminal) {
+            DebugAdapter.terminal.sendText('\u0003');
+            // DebugAdapter.terminal.dispose();
+            // DebugAdapter.terminal = undefined;
+        }
+
+        if (this.scrcpy) {
+            this.scrcpy.sendText('\u0003');
+            this.scrcpy.dispose();
+            this.scrcpy = undefined;
+        }
 
         if (this.jdwpCleanup) {
             await this.jdwpCleanup();
