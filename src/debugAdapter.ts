@@ -188,7 +188,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         }
         else
             this.scrcpy.sendText('\u0003');
-        this.scrcpy.sendText(` scrcpy -s ${config.target.udid} --capture-orientation=0`);
+        this.scrcpy.sendText(` scrcpy -s ${config.target.udid} --keyboard=uhid --gamepad=uhid --capture-orientation=0`);
 
         if (config.resumeProcess) {
             try {
