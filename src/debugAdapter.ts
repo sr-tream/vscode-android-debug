@@ -157,7 +157,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
             this.scrcpy = vscode.window.createTerminal("ScrCpy");
         else
             this.scrcpy.sendText('\u0003');
-        this.scrcpy.sendText(`scrcpy -s ${config.target.udid} --lock-video-orientation=1`);
+        this.scrcpy.sendText(`scrcpy -s ${config.target.udid} --capture-orientation=0`);
 
         if (config.resumeProcess) {
             try {
