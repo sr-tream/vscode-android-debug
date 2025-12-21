@@ -153,13 +153,18 @@ export async function startLldbServer(device: Device, packageName: string, abi: 
     const lldbServerDir = `/data/data/${packageName}/android-debug/lldb/bin`;
     const lldbServerPath = `${lldbServerDir}/lldb-server`;
 
-    await deviceAdb.push(lldbServerLocalPath, lldbServerTmpPath);
-    await deviceAdb.shell(`run-as ${packageName} mkdir -p ${lldbServerDir}`);
-
-    // Ignore failures if already exists
     try {
-        await deviceAdb.shell(`cat ${lldbServerTmpPath} | run-as ${packageName} sh -c 'cat > ${lldbServerPath} && chmod 700 ${lldbServerPath}'`);
-    } catch {}
+        // Do not push llsdb-server if it already exists
+        await deviceAdb.shell(`test -f "${lldbServerPath}"`);
+    } catch {
+        await deviceAdb.push(lldbServerLocalPath, lldbServerTmpPath);
+        await deviceAdb.shell(`run-as ${packageName} mkdir -p ${lldbServerDir}`);
+
+        // Ignore failures if already exists
+        try {
+            await deviceAdb.shell(`cat ${lldbServerTmpPath} | run-as ${packageName} sh -c 'cat > ${lldbServerPath} && chmod 700 ${lldbServerPath}'`);
+        } catch { }
+    }
 
     let socket = `/${packageName}/platform-${utils.randomString(16)}.sock`;
     let subprocess = deviceAdb.createSubProcess(['shell', `run-as ${packageName} ${lldbServerPath} platform --listen unix-abstract://${socket}`]);
