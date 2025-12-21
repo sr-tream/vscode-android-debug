@@ -21,11 +21,25 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     private session: vscode.DebugSession;
     private childSessions: {[key: string]: vscode.DebugSession} = {};
     private jdwpCleanup: (() => Promise<void>) | undefined;
-    private static terminal: vscode.Terminal | undefined;
+    private static terminal: Map<string, vscode.Terminal> | undefined; 
     private scrcpy: vscode.Terminal | undefined;
+    private sessionName: string | undefined;
+    private terminalWatcher: vscode.Disposable | undefined;
 
     constructor(context: vscode.ExtensionContext, session: vscode.DebugSession) {
         super();
+
+        if (!DebugAdapter.terminal) {
+            DebugAdapter.terminal = new Map<string, vscode.Terminal>();
+        } else {
+            DebugAdapter.terminal.forEach((term, device) => {
+                if (term.exitStatus === undefined) {
+                    term.dispose();
+                    DebugAdapter.terminal!.delete(device);
+                }
+            });
+        }
+        this.terminalWatcher = vscode.window.onDidCloseTerminal(this.didCloseTerminal.bind(this));
 
         this.session = session;
         context.subscriptions.push(vscode.debug.onDidStartDebugSession(this.onDidStartDebugSession));
@@ -144,28 +158,29 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     private async resumeProcess(pid: string) {
         let config = this.session.configuration;
 
-        if (!DebugAdapter.terminal || DebugAdapter.terminal.exitStatus !== undefined || DebugAdapter.terminal.name !== this.session.name) {
-            if (DebugAdapter.terminal && (DebugAdapter.terminal.exitStatus !== undefined || DebugAdapter.terminal.name !== this.session.name))
-                DebugAdapter.terminal.dispose();
-
-            const term: vscode.TerminalOptions = {
-                name: this.session.name,
-                shellPath: "sh",
-                shellArgs: ["--noprofile"],
-                hideFromUser: false,
-                iconPath: new vscode.ThemeIcon("debug")
-            };
-            DebugAdapter.terminal = vscode.window.createTerminal(term);
-        } else
-            DebugAdapter.terminal.sendText('\u0003');
-        DebugAdapter.terminal.sendText(`adb -s ${config.target.udid} logcat -v raw -v color --pid=${pid} | uniq`);
-        DebugAdapter.terminal.show();
+        this.sessionName = this.session.name + "@" + config.target.udid;
+        let term = DebugAdapter.terminal!.get(this.sessionName);
+        if (term) {
+            if (term.exitStatus !== undefined) {
+                term.sendText('\u0003');
+            }
+            term.hide();
+            term.dispose();
+        }
+        const termOpts: vscode.TerminalOptions = {
+            name: this.sessionName,
+            hideFromUser: false,
+            iconPath: new vscode.ThemeIcon("debug"),
+            isTransient: false,
+        };
+        term = vscode.window.createTerminal(termOpts);
+        term.sendText(` trap '' INT; adb -s ${config.target.udid} logcat -v raw -v color --pid=${pid} | uniq; echo -e '\nPress 'Enter' to close session...' && read -s -r && exit`);
+        term.show();
+        DebugAdapter.terminal!.set(this.sessionName, term);
 
         if (!this.scrcpy) {
             const term: vscode.TerminalOptions = {
-                name: "ScrCpy",
-                shellPath: "sh",
-                shellArgs: ["--noprofile"],
+                name: "ScrCpy-" + this.sessionName,
                 hideFromUser: true,
                 iconPath: new vscode.ThemeIcon("device-mobile")
             };
@@ -173,7 +188,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         }
         else
             this.scrcpy.sendText('\u0003');
-        this.scrcpy.sendText(`scrcpy -s ${config.target.udid} --capture-orientation=0`);
+        this.scrcpy.sendText(` scrcpy -s ${config.target.udid} --capture-orientation=0`);
 
         if (config.resumeProcess) {
             try {
@@ -250,13 +265,6 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request | undefined): Promise<void> {
         await Promise.all(Object.values(this.childSessions).map(async (s) => await vscode.debug.stopDebugging(s)));
 
-        if (DebugAdapter.terminal) {
-            DebugAdapter.terminal.sendText('\u0003');
-            DebugAdapter.terminal.sendText('true');
-            // DebugAdapter.terminal.dispose();
-            // DebugAdapter.terminal = undefined;
-        }
-
         if (this.scrcpy) {
             this.scrcpy.sendText('\u0003');
             this.scrcpy.dispose();
@@ -270,5 +278,18 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
 
         this.consoleLog("Debugger detached");
         this.sendResponse(response);
+    }
+
+    private async didCloseTerminal(terminal: vscode.Terminal) {
+        if (terminal.name === this.sessionName) {
+            DebugAdapter.terminal!.delete(this.sessionName);
+            let session = this.session;
+            if (session) {
+                while (session.parentSession !== undefined)
+                    session = session.parentSession;
+                vscode.debug.stopDebugging(session);
+            }
+            this.terminalWatcher?.dispose();
+        }
     }
 }
