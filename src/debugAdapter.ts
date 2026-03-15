@@ -113,6 +113,34 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         return javaConfig;
     }
 
+    private createTerminal(options: vscode.TerminalOptions) {
+        if (process.platform === "win32") {
+            options = {
+                ...options,
+                shellPath: "powershell.exe",
+                shellArgs: ["-NoLogo"],
+            };
+        }
+
+        return vscode.window.createTerminal(options);
+    }
+
+    private getLogcatCommand(udid: string, pid: string) {
+        const shellHistoryPrefix = process.platform === "win32" ? "" : " ";
+
+        if (process.platform === "win32") {
+            return `try { adb -s ${udid} logcat -v raw -v color --pid=${pid} | Get-Unique } finally { $null = Read-Host 'Press Enter to close session...'; exit }`;
+        }
+
+        return `${shellHistoryPrefix}trap '' INT; adb -s ${udid} logcat -v raw -v color --pid=${pid} | uniq; echo -e '\nPress 'Enter' to close session...' && read -s -r && exit`;
+    }
+
+    private getScrcpyCommand(udid: string) {
+        const shellHistoryPrefix = process.platform === "win32" ? "" : " ";
+
+        return `${shellHistoryPrefix}scrcpy -s ${udid} --keyboard=uhid --gamepad=uhid --capture-orientation=0`;
+    }
+
     private async attachToProcess(pid: string, response: DebugProtocol.Response) {
         let config = this.session.configuration;
 
@@ -173,22 +201,22 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
             iconPath: new vscode.ThemeIcon("debug"),
             isTransient: false,
         };
-        term = vscode.window.createTerminal(termOpts);
-        term.sendText(` trap '' INT; adb -s ${config.target.udid} logcat -v raw -v color --pid=${pid} | uniq; echo -e '\nPress 'Enter' to close session...' && read -s -r && exit`);
+        term = this.createTerminal(termOpts);
+        term.sendText(this.getLogcatCommand(config.target.udid, pid));
         term.show();
         DebugAdapter.terminal!.set(this.sessionName, term);
 
         if (!this.scrcpy) {
-            const term: vscode.TerminalOptions = {
+            const scrcpyTermOpts: vscode.TerminalOptions = {
                 name: "ScrCpy-" + this.sessionName,
                 hideFromUser: true,
                 iconPath: new vscode.ThemeIcon("device-mobile")
             };
-            this.scrcpy = vscode.window.createTerminal(term);
+            this.scrcpy = this.createTerminal(scrcpyTermOpts);
         }
         else
             this.scrcpy.sendText('\u0003');
-        this.scrcpy.sendText(` scrcpy -s ${config.target.udid} --keyboard=uhid --gamepad=uhid --capture-orientation=0`);
+        this.scrcpy.sendText(this.getScrcpyCommand(config.target.udid));
 
         if (config.resumeProcess) {
             try {
