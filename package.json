@@ -446,6 +446,22 @@
                                 "type": "string",
                                 "default": ".MainActivity"
                             },
+                            "pid": {
+                                "description": "Optional explicit pid to attach to after launching the app. Skips pid auto-discovery when set. Useful when the caller computes the pid out-of-band (e.g. wrap.sh / HWASan flows) or wants to bind to a specific existing instance.",
+                                "anyOf": [
+                                    {
+                                        "type": "number"
+                                    },
+                                    {
+                                        "type": "string"
+                                    }
+                                ]
+                            },
+                            "waitForDebugger": {
+                                "description": "Pass `-D` to `am start` so the app blocks in JDWP until a debugger attaches. Off by default — fragile under wrap.sh / HWASan cold starts.",
+                                "type": "boolean",
+                                "default": false
+                            },
                             "mode": {
                                 "description": "Debugger mode, `java`, `native` or `dual`",
                                 "enum": [

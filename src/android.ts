@@ -221,42 +221,123 @@ export async function getHostSimpleperf(): Promise<string> {
 }
 
 // Process information
-export async function getProcessList(device: Device, populatePackageNames: boolean = false) {
-    let deviceAdb = await getDeviceAdb(device);
+export interface ProcessInfo {
+    pid: string;
+    name: string;
+    packages: string[];
+}
 
+async function getJdwpPidsInternal(deviceAdb: ADB): Promise<string[]> {
     let subprocess = deviceAdb.createSubProcess(['jdwp']);
     subprocess.start();
 
-    let resolveWaitTimer: (v: void) => void;
-    let processWaitTimer = new Promise((resolve, reject) => { resolveWaitTimer = resolve; });
-    // @ts-ignore
-    let timeout = setTimeout(resolveWaitTimer, 3000);
+    try {
+        let resolveWaitTimer: (v: void) => void;
+        let processWaitTimer = new Promise((resolve, reject) => { resolveWaitTimer = resolve; });
+        // @ts-ignore
+        let timeout = setTimeout(resolveWaitTimer, 3000);
 
-    let processPromises: Promise<{pid: string, name: string, packages: string[]}>[] = [];
-    subprocess.on('lines-stdout', (lines: string[]) => {
-        // Clear timeout first if we have more output
-        clearTimeout(timeout);
+        let pids: string[] = [];
+        subprocess.on('lines-stdout', (lines: string[]) => {
+            clearTimeout(timeout);
+            pids.push(...lines.map((l) => l.trim()).filter((l) => l.length > 0));
+            timeout = setTimeout(resolveWaitTimer, 200);
+        });
 
-        // Get process info
-        let processes = lines
-                            .map((l) => l.trim())
-                            .map((pid: string) => getProcessInfoInternal(deviceAdb, pid, populatePackageNames));
+        await processWaitTimer;
+        return pids;
+    }
+    finally {
+        // Always stop the subprocess — previously this leaked file descriptors
+        // on exceptions thrown during process-info enrichment.
+        try { await subprocess.stop(); } catch { /* ignore */ }
+    }
+}
 
-        processPromises.push(...processes);
+export async function getJdwpPids(device: Device): Promise<string[]> {
+    return getJdwpPidsInternal(await getDeviceAdb(device));
+}
 
-        // Wait for 200 ms for more output, if any
-        timeout = setTimeout(resolveWaitTimer, 200);
-    });
+// Discover app pids that are running but may be missing from `adb jdwp`
+// (e.g. wrap.sh / HWASan builds on OEM-hardened Android). Uses `ps -A` and
+// filters to process names that look like package ids.
+async function getRunningAppPidsInternal(deviceAdb: ADB): Promise<string[]> {
+    try {
+        // toybox ps on Android: PID is the first column, NAME (process name) the second.
+        // Process/thread names can be truncated to 15 chars by the kernel but still
+        // retain enough dots to match the package-id heuristic.
+        let out = await deviceAdb.shell(`ps -A -o PID,NAME`) as string;
+        let pids: string[] = [];
+        for (let line of out.split(/\r?\n/)) {
+            let trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("PID")) { continue; }
+            let parts = trimmed.split(/\s+/);
+            if (parts.length < 2) { continue; }
+            let pid = parts[0];
+            let name = parts[1];
+            // Package-id heuristic: starts with a lowercase letter, contains at least
+            // one dot, and uses only package-id characters.
+            if (/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/i.test(name)) {
+                pids.push(pid);
+            }
+        }
+        return pids;
+    } catch {
+        return [];
+    }
+}
 
-    await processWaitTimer;
+export async function getProcessList(device: Device, populatePackageNames: boolean = false): Promise<ProcessInfo[]> {
+    let deviceAdb = await getDeviceAdb(device);
 
-    await subprocess.stop();
+    let [jdwpPids, psPids] = await Promise.all([
+        getJdwpPidsInternal(deviceAdb),
+        getRunningAppPidsInternal(deviceAdb),
+    ]);
 
-    let processList = await Promise.all(processPromises);
+    let merged = Array.from(new Set([...jdwpPids, ...psPids]));
+
+    let processList = await Promise.all(
+        merged.map((pid) => getProcessInfoInternal(deviceAdb, pid, populatePackageNames))
+    );
 
     logger.log("getProcessList", processList);
 
     return processList;
+}
+
+// Resolve pid(s) for a package using on-device `pidof`. Authoritative on
+// Android 6+ and survives wrap.sh — unlike `adb jdwp`.
+export async function getPidsForPackage(device: Device, packageName: string): Promise<string[]> {
+    if (!packageName) { return []; }
+
+    let deviceAdb = await getDeviceAdb(device);
+    try {
+        let out = await deviceAdb.shell(`pidof ${packageName}`) as string;
+        return out.trim().split(/\s+/).filter((p) => /^\d+$/.test(p));
+    } catch {
+        return [];
+    }
+}
+
+// Poll `pidof <packageName>` until a pid appears or the budget is exhausted.
+// Returns the first pid found, or undefined if the process never shows up.
+export async function waitForPidForPackage(
+    device: Device,
+    packageName: string,
+    options: { timeoutMs?: number, pollMs?: number } = {}
+): Promise<string | undefined> {
+    let timeoutMs = options.timeoutMs ?? 15000;
+    let pollMs = options.pollMs ?? 500;
+    let deadline = Date.now() + timeoutMs;
+
+    while (Date.now() <= deadline) {
+        let pids = await getPidsForPackage(device, packageName);
+        if (pids.length > 0) { return pids[0]; }
+        if (Date.now() + pollMs > deadline) { break; }
+        await new Promise((r) => setTimeout(r, pollMs));
+    }
+    return undefined;
 }
 
 async function getProcessInfoInternal(deviceAdb: ADB, pid: string, populatePackageNames: boolean) {
@@ -413,10 +494,14 @@ export async function installApp(device: Device, apkPath: string) {
     }
 }
 
-export async function launchApp(device: Device, packageName: string, launchActivity: string) {
+export async function launchApp(device: Device, packageName: string, launchActivity: string, options: { waitForDebugger?: boolean } = {}) {
     let deviceAdb = await getDeviceAdb(device);
 
-    let launchCmd = `am start -D -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}/${launchActivity}`;
+    // `-W` blocks am until the activity is resumed so we get an authoritative
+    // success/failure. `-D` (wait-for-debugger) is opt-in — it pauses the app
+    // inside JDWP and is fragile under wrap.sh / HWASan cold starts.
+    let flags = options.waitForDebugger ? "-D -W" : "-W";
+    let launchCmd = `am start ${flags} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}/${launchActivity}`;
 
     let {stdout, stderr} = await deviceAdb.shell(launchCmd, {outputFormat: deviceAdb.EXEC_OUTPUT_FORMAT.FULL} as ShellExecOptions) as any as {stdout: string, stderr: string};
 

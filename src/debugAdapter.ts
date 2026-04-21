@@ -258,29 +258,67 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
                 throw new Error("A valid package name is required.");
             }
             this.consoleLog(`Launching the app activity ${config.packageName}/${config.launchActivity}`);
-            await android.launchApp(target, config.packageName, config.launchActivity);
+            await android.launchApp(target, config.packageName, config.launchActivity, {
+                waitForDebugger: Boolean(config.waitForDebugger),
+            });
 
-            this.consoleLog(`Getting pid for the launched app`);
-
-            // Wait for some time before trying to get pid
-            await new Promise((resolve, reject) => setTimeout(resolve, 1000));
-
-            // Get last pid from jdwp
-            let processList = await android.getProcessList(target, false);
-            let process = processList.length ? processList[processList.length - 1] : undefined;
-
-            if (!process?.pid) {
-                throw new Error("Could not get pid for the app. Please ensure that the app is launched correctly.");
+            let pid: string | undefined;
+            if (config.pid) {
+                pid = String(config.pid);
+                this.consoleLog(`Using explicit pid ${pid}`);
             }
             else {
-                this.consoleLog(`Attaching to process ${process.pid} (${process.name})`);
+                this.consoleLog(`Getting pid for the launched app`);
+
+                // Primary: poll `pidof <packageName>`. Authoritative on Android 6+
+                // and independent of JDWP registration (survives wrap.sh / HWASan).
+                pid = await android.waitForPidForPackage(target, config.packageName, { timeoutMs: 15000, pollMs: 500 });
+
+                // Secondary: legacy filtered process list for pre-Android-6 devices
+                // where `pidof <package>` is unavailable.
+                if (!pid) {
+                    let processList = await android.getProcessList(target, true);
+                    let match = processList.find((p) =>
+                        p.packages.includes(config.packageName)
+                        || p.name === config.packageName
+                        || config.packageName.endsWith(p.name)
+                    );
+                    pid = match?.pid;
+                }
+
+                if (!pid) {
+                    throw new Error(
+                        `App '${config.packageName}' does not appear to be running.\n` +
+                        `  - verify AndroidManifest declares '${config.launchActivity}' as a launchable activity\n` +
+                        `  - verify 'adb shell pm path ${config.packageName}' succeeds on the target device`
+                    );
+                }
+
+                this.consoleLog(`Attaching to process ${pid}`);
+
+                // Diagnostic: warn early if Java is requested but the pid isn't
+                // advertised by `adb jdwp`. Common on wrap.sh / HWASan builds on
+                // OEM-hardened Android where JDWP never registers.
+                if (config.mode === "dual" || config.mode === "java") {
+                    try {
+                        let jdwpPids = await android.getJdwpPids(target);
+                        if (!jdwpPids.includes(pid)) {
+                            this.consoleLog(
+                                `Warning: pid ${pid} is not visible in 'adb jdwp'. ` +
+                                `Java debugger may fail to attach. ` +
+                                `This is common with wrap.sh / HWASan builds on some OEM Android builds — ` +
+                                `consider "mode": "native" to attach only LLDB.`
+                            );
+                        }
+                    } catch { /* best-effort diagnostic */ }
+                }
             }
 
             // Attach to the process
-            await this.attachToProcess(process.pid, response);
+            await this.attachToProcess(pid, response);
 
             // Resume process if applicable
-            await this.resumeProcess(process.pid);
+            await this.resumeProcess(pid);
         }
         catch (e: any) {
             response.success = false;
