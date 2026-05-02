@@ -458,9 +458,8 @@
                                 ]
                             },
                             "waitForDebugger": {
-                                "description": "Pass `-D` to `am start` so the app blocks in JDWP until a debugger attaches. Off by default — fragile under wrap.sh / HWASan cold starts.",
-                                "type": "boolean",
-                                "default": false
+                                "description": "Pass `-D` to `am start` so the app blocks in JDWP until a debugger attaches. When unset, defaults to `true` for normal apps and `false` for apps that ship `lib/<abi>/wrap.sh` (e.g. HWASan builds), since `-D` deadlocks under wrap.sh on some OEM Android builds.",
+                                "type": "boolean"
                             },
                             "mode": {
                                 "description": "Debugger mode, `java`, `native` or `dual`",

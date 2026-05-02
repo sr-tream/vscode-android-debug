@@ -258,8 +258,23 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
                 throw new Error("A valid package name is required.");
             }
             this.consoleLog(`Launching the app activity ${config.packageName}/${config.launchActivity}`);
+
+            let waitForDebugger: boolean;
+            if (typeof config.waitForDebugger === "boolean") {
+                waitForDebugger = config.waitForDebugger;
+            } else {
+                // Default: enable `-D` so the debugger can attach before user code runs.
+                // Skip it for wrap.sh / HWASan builds where JDWP often never registers
+                // and `-D` would deadlock the launch.
+                let usesWrapSh = await android.hasWrapSh(target, config.packageName);
+                waitForDebugger = !usesWrapSh;
+                if (usesWrapSh) {
+                    this.consoleLog(`Detected wrap.sh in '${config.packageName}', launching without -D (wait-for-debugger)`);
+                }
+            }
+
             await android.launchApp(target, config.packageName, config.launchActivity, {
-                waitForDebugger: Boolean(config.waitForDebugger),
+                waitForDebugger,
             });
 
             let pid: string | undefined;

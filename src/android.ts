@@ -306,6 +306,32 @@ export async function getProcessList(device: Device, populatePackageNames: boole
     return processList;
 }
 
+// True if the installed APK ships a `lib/<abi>/wrap.sh`. Such apps
+// (typically HWASan / sanitizer builds) are launched via `wrap.sh`, which on
+// some OEM Android builds suppresses JDWP registration — so `am start -D`
+// would deadlock waiting for a JDWP attach that never becomes possible.
+export async function hasWrapSh(device: Device, packageName: string): Promise<boolean> {
+    if (!packageName) { return false; }
+
+    let deviceAdb = await getDeviceAdb(device);
+    try {
+        let pmOut = await deviceAdb.shell(`pm path ${packageName}`) as string;
+        let firstApk = pmOut.split(/\r?\n/)
+            .map((l) => l.trim())
+            .find((l) => l.startsWith("package:"));
+        if (!firstApk) { return false; }
+
+        let apkPath = firstApk.substring("package:".length);
+        let baseDir = apkPath.replace(/\/[^/]*$/, "");
+        if (!baseDir) { return false; }
+
+        let lsOut = await deviceAdb.shell(`ls ${baseDir}/lib/*/wrap.sh 2>/dev/null`) as string;
+        return lsOut.trim().length > 0;
+    } catch {
+        return false;
+    }
+}
+
 // Resolve pid(s) for a package using on-device `pidof`. Authoritative on
 // Android 6+ and survives wrap.sh — unlike `adb jdwp`.
 export async function getPidsForPackage(device: Device, packageName: string): Promise<string[]> {
