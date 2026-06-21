@@ -291,6 +291,21 @@
                                 "type": "boolean",
                                 "default": false
                             },
+                            "logcat": {
+                                "description": "Configuration for logcat collection.",
+                                "type": "object",
+                                "properties": {
+                                    "bufferSize": {
+                                        "description": "Optional size for the device main logcat buffer before starting logcat, for example `16M`. This changes device-global logd state and is opt-in.",
+                                        "type": "string"
+                                    },
+                                    "restartOnFailure": {
+                                        "description": "Restart logcat if it exits while the debugged process still appears to be running.",
+                                        "type": "boolean",
+                                        "default": true
+                                    }
+                                }
+                            },
                             "native": {
                                 "description": "Configuration for native debugger.",
                                 "type": "object",
@@ -474,6 +489,21 @@
                                 "description": "Resume the process in case it is waiting for debugger. Only applicable in 'native' mode.",
                                 "type": "boolean",
                                 "default": true
+                            },
+                            "logcat": {
+                                "description": "Configuration for logcat collection.",
+                                "type": "object",
+                                "properties": {
+                                    "bufferSize": {
+                                        "description": "Optional size for the device main logcat buffer before starting logcat, for example `16M`. This changes device-global logd state and is opt-in.",
+                                        "type": "string"
+                                    },
+                                    "restartOnFailure": {
+                                        "description": "Restart logcat if it exits while the debugged process still appears to be running.",
+                                        "type": "boolean",
+                                        "default": true
+                                    }
+                                }
                             },
                             "native": {
                                 "description": "Configuration for native debugger.",

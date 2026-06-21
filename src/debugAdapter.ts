@@ -5,6 +5,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import * as extensionDependencies from './extensionDependencies';
 import * as android from './android';
 import { Device } from './commonTypes';
+import { getLogcatCommand } from './logcatCommand';
 
 export class DebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory  {
     private context: vscode.ExtensionContext;
@@ -125,16 +126,6 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         return vscode.window.createTerminal(options);
     }
 
-    private getLogcatCommand(udid: string, pid: string) {
-        const shellHistoryPrefix = process.platform === "win32" ? "" : " ";
-
-        if (process.platform === "win32") {
-            return `try { adb -s ${udid} logcat -v raw -v color --pid=${pid} | Get-Unique } finally { $null = Read-Host 'Press Enter to close session...'; exit }`;
-        }
-
-        return `${shellHistoryPrefix}trap '' INT; adb -s ${udid} logcat -v raw -v color --pid=${pid} | uniq; echo -e '\nPress 'Enter' to close session...' && read -s -r && exit`;
-    }
-
     private getScrcpyCommand(udid: string) {
         const shellHistoryPrefix = process.platform === "win32" ? "" : " ";
 
@@ -202,7 +193,12 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
             isTransient: false,
         };
         term = this.createTerminal(termOpts);
-        term.sendText(this.getLogcatCommand(config.target.udid, pid));
+        term.sendText(getLogcatCommand({
+            udid: config.target.udid,
+            pid,
+            packageName: config.packageName,
+            logcat: config.logcat,
+        }));
         term.show();
         DebugAdapter.terminal!.set(this.sessionName, term);
 

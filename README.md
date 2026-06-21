@@ -135,6 +135,18 @@ Here are all the options supported with explanation and example values.
     // Only applicable in 'native' mode.
     "resumeProcess": true,
 
+    // Options for logcat output
+    "logcat": {
+        // Optional size for the device main logcat buffer before starting logcat.
+        // Example values include "16M" or "64M".
+        // Defaults to unset. When set, this changes device-global logd state.
+        "bufferSize": "16M",
+
+        // Restart logcat if it exits while the debugged process is still running.
+        // Defaults to true.
+        "restartOnFailure": true,
+    },
+
     // Options for native debugging
     "native": {
         // List of supported ABIs for the app.
