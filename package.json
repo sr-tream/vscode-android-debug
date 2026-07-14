@@ -306,6 +306,21 @@
                                     }
                                 }
                             },
+                            "scrcpy": {
+                                "description": "Select an existing Android display for scrcpy while attaching.",
+                                "type": "object",
+                                "required": [
+                                    "displayId"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "displayId": {
+                                        "description": "Existing Android display ID to mirror with scrcpy.",
+                                        "type": "integer",
+                                        "minimum": 0
+                                    }
+                                }
+                            },
                             "native": {
                                 "description": "Configuration for native debugger.",
                                 "type": "object",
@@ -502,6 +517,57 @@
                                         "description": "Restart logcat if it exits while the debugged process still appears to be running.",
                                         "type": "boolean",
                                         "default": true
+                                    }
+                                }
+                            },
+                            "scrcpy": {
+                                "description": "Select an existing Android display or create a virtual display for the app and scrcpy.",
+                                "type": "object",
+                                "additionalProperties": false,
+                                "oneOf": [
+                                    {
+                                        "required": [
+                                            "displayId"
+                                        ]
+                                    },
+                                    {
+                                        "required": [
+                                            "newDisplay"
+                                        ]
+                                    }
+                                ],
+                                "properties": {
+                                    "displayId": {
+                                        "description": "Existing Android display ID on which to launch the app and which to mirror with scrcpy.",
+                                        "type": "integer",
+                                        "minimum": 0
+                                    },
+                                    "newDisplay": {
+                                        "description": "Virtual display to create with scrcpy before launching the app.",
+                                        "type": "object",
+                                        "required": [
+                                            "width",
+                                            "height",
+                                            "dpi"
+                                        ],
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "width": {
+                                                "description": "Virtual display width in pixels.",
+                                                "type": "integer",
+                                                "minimum": 1
+                                            },
+                                            "height": {
+                                                "description": "Virtual display height in pixels.",
+                                                "type": "integer",
+                                                "minimum": 1
+                                            },
+                                            "dpi": {
+                                                "description": "Virtual display density in dots per inch.",
+                                                "type": "integer",
+                                                "minimum": 1
+                                            }
+                                        }
                                     }
                                 }
                             },

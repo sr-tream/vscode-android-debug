@@ -520,16 +520,27 @@ export async function installApp(device: Device, apkPath: string) {
     }
 }
 
-export async function launchApp(device: Device, packageName: string, launchActivity: string, options: { waitForDebugger?: boolean } = {}) {
+export interface LaunchAppOptions {
+    waitForDebugger?: boolean;
+    displayId?: number;
+}
+
+export function getLaunchAppCommand(packageName: string, launchActivity: string, options: LaunchAppOptions = {}) {
+    let flags = options.waitForDebugger ? "-D -W" : "-W";
+    let display = options.displayId !== undefined ? ` --display ${options.displayId}` : "";
+    return `am start ${flags}${display} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}/${launchActivity}`;
+}
+
+export async function launchApp(device: Device, packageName: string, launchActivity: string, options: LaunchAppOptions = {}) {
     let deviceAdb = await getDeviceAdb(device);
 
     // `-W` blocks am until the activity is resumed so we get an authoritative
     // success/failure. `-D` (wait-for-debugger) is opt-in — it pauses the app
     // inside JDWP and is fragile under wrap.sh / HWASan cold starts.
-    let flags = options.waitForDebugger ? "-D -W" : "-W";
-    let launchCmd = `am start ${flags} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}/${launchActivity}`;
+    let launchCmd = getLaunchAppCommand(packageName, launchActivity, options);
 
     let {stdout, stderr} = await deviceAdb.shell(launchCmd, {outputFormat: deviceAdb.EXEC_OUTPUT_FORMAT.FULL} as ShellExecOptions) as any as {stdout: string, stderr: string};
+    let output = `${stdout}\n${stderr}`;
 
     // The error handling is inspired from from appium-adb's startApp method
     if (stderr.includes('Error: Activity class') && stderr.includes('does not exist')) {
@@ -539,5 +550,10 @@ export async function launchApp(device: Device, packageName: string, launchActiv
     } else if (stderr.includes('java.lang.SecurityException')) {
         // if the app is disabled on a real device it will throw a security exception
         throw new Error(`The permission to start activity has been denied. Make sure the activity/package names are correct.`);
+    } else if (options.displayId !== undefined) {
+        let errorLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith("Error:") || /(?:Exception|invalid display)/i.test(line));
+        if (errorLine) {
+            throw new Error(`Could not launch the app on display ${options.displayId}: ${errorLine}`);
+        }
     }
 }

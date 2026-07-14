@@ -18,6 +18,8 @@ Debug Android apps in VS Code, with Native, Java or Dual debugging.
 - [Debugger for Java](https://marketplace.visualstudio.com/items?itemName=vscjava.vscode-java-debug) extension for java debugging
 - [Language Support for Java(TM) by Red Hat](https://marketplace.visualstudio.com/items?itemName=redhat.java) extension for java debugging
 
+- [scrcpy](https://github.com/Genymobile/scrcpy) available on `PATH`. Creating a virtual display requires scrcpy 3.0 or newer.
+
 # Quick Start
 
 For a simple Android app with both Java and Native code, the following config should get you started. See [Launch Configuration Options](#launch-configuration-options) for more details.
@@ -147,6 +149,20 @@ Here are all the options supported with explanation and example values.
         "restartOnFailure": true,
     },
 
+    // Optional display selection for scrcpy and app launch.
+    // Omit this block to mirror the main Android display as usual.
+    "scrcpy": {
+        // Mirror an existing display and, for launch requests, start the app on it.
+        "displayId": 2,
+
+        // Or create a virtual display before launching the app (launch requests only).
+        // "newDisplay": {
+        //     "width": 1920,
+        //     "height": 1080,
+        //     "dpi": 420,
+        // },
+    },
+
     // Options for native debugging
     "native": {
         // List of supported ABIs for the app.
@@ -185,6 +201,30 @@ Here are all the options supported with explanation and example values.
     }
 }
 ```
+
+### scrcpy displays
+
+To launch an app on an existing Android display and mirror that display:
+
+```jsonc
+"scrcpy": {
+    "displayId": 2
+}
+```
+
+To create a virtual display with a fixed resolution and density, then launch and debug the app on it:
+
+```jsonc
+"scrcpy": {
+    "newDisplay": {
+        "width": 1920,
+        "height": 1080,
+        "dpi": 420
+    }
+}
+```
+
+`displayId` and `newDisplay` are mutually exclusive. Attach requests support only `displayId`, because an already-running process cannot be launched onto a newly created display. If scrcpy cannot create or report a new virtual display, the extension warns and falls back to display 0. Once creation succeeds, errors from `am start --display` remain fatal. Explicit existing display IDs are always strict and do not fall back.
 
 # Configurations
 The following settings can be set as per your requirements and setup.

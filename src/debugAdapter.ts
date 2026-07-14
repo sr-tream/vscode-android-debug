@@ -6,6 +6,7 @@ import * as extensionDependencies from './extensionDependencies';
 import * as android from './android';
 import { Device } from './commonTypes';
 import { getLogcatCommand } from './logcatCommand';
+import { ScrcpyConfiguration, ScrcpyProcessController, validateScrcpyConfiguration } from './scrcpy';
 
 export class DebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory  {
     private context: vscode.ExtensionContext;
@@ -23,7 +24,10 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     private childSessions: {[key: string]: vscode.DebugSession} = {};
     private jdwpCleanup: (() => Promise<void>) | undefined;
     private static terminal: Map<string, vscode.Terminal> | undefined; 
-    private scrcpy: vscode.Terminal | undefined;
+    private scrcpy: ScrcpyProcessController;
+    private scrcpyConfiguration: ScrcpyConfiguration | undefined;
+    private scrcpyFallbackToMain = false;
+    private newDisplayStarted = false;
     private sessionName: string | undefined;
     private terminalWatcher: vscode.Disposable | undefined;
 
@@ -41,6 +45,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
             });
         }
         this.terminalWatcher = vscode.window.onDidCloseTerminal(this.didCloseTerminal.bind(this));
+        this.scrcpy = new ScrcpyProcessController((message) => this.consoleLog(message));
 
         this.session = session;
         context.subscriptions.push(vscode.debug.onDidStartDebugSession(this.onDidStartDebugSession));
@@ -126,12 +131,6 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         return vscode.window.createTerminal(options);
     }
 
-    private getScrcpyCommand(udid: string) {
-        const shellHistoryPrefix = process.platform === "win32" ? "" : " ";
-
-        return `${shellHistoryPrefix}scrcpy -s ${udid} --keyboard=uhid --gamepad=uhid --capture-orientation=0`;
-    }
-
     private async attachToProcess(pid: string, response: DebugProtocol.Response) {
         let config = this.session.configuration;
 
@@ -174,6 +173,65 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         }
     }
 
+    private configureScrcpy(request: "attach" | "launch") {
+        this.scrcpyConfiguration = validateScrcpyConfiguration(this.session.configuration.scrcpy, request);
+        this.scrcpyFallbackToMain = false;
+        this.newDisplayStarted = false;
+    }
+
+    private async prepareScrcpyForAttach(udid: string) {
+        if (this.scrcpyConfiguration?.displayId === undefined) {
+            return;
+        }
+
+        this.consoleLog(`Starting scrcpy for display ${this.scrcpyConfiguration.displayId}`);
+        await this.scrcpy.start(udid, this.scrcpyConfiguration);
+    }
+
+    private async prepareScrcpyForLaunch(udid: string): Promise<number | undefined> {
+        if (this.scrcpyConfiguration?.displayId !== undefined) {
+            this.consoleLog(`Starting scrcpy for display ${this.scrcpyConfiguration.displayId}`);
+            await this.scrcpy.start(udid, this.scrcpyConfiguration);
+            return this.scrcpyConfiguration.displayId;
+        }
+
+        if (!this.scrcpyConfiguration?.newDisplay) {
+            return undefined;
+        }
+
+        let display = this.scrcpyConfiguration.newDisplay;
+        this.consoleLog(`Creating scrcpy virtual display ${display.width}x${display.height}/${display.dpi}`);
+        try {
+            let result = await this.scrcpy.start(udid, this.scrcpyConfiguration);
+            if (result.displayId === undefined) {
+                throw new Error("scrcpy did not report the new display ID.");
+            }
+            this.newDisplayStarted = true;
+            this.consoleLog(`Created scrcpy virtual display ${result.displayId}`);
+            return result.displayId;
+        } catch (error: any) {
+            this.scrcpyFallbackToMain = true;
+            this.consoleLog(`Warning: Could not create the configured scrcpy virtual display: ${error.message}`);
+            this.consoleLog("Falling back to Android display 0");
+            return undefined;
+        }
+    }
+
+    private async ensureScrcpyStarted(udid: string) {
+        if (this.scrcpy.isRunning()) {
+            return;
+        }
+        if (this.newDisplayStarted) {
+            throw new Error("The scrcpy virtual display exited before debugger startup completed.");
+        }
+
+        let configuration = this.scrcpyFallbackToMain ? undefined : this.scrcpyConfiguration;
+        if (configuration?.displayId !== undefined) {
+            this.consoleLog(`Restarting scrcpy for display ${configuration.displayId}`);
+        }
+        await this.scrcpy.start(udid, configuration);
+    }
+
     private async resumeProcess(pid: string) {
         let config = this.session.configuration;
 
@@ -202,17 +260,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         term.show();
         DebugAdapter.terminal!.set(this.sessionName, term);
 
-        if (!this.scrcpy) {
-            const scrcpyTermOpts: vscode.TerminalOptions = {
-                name: "ScrCpy-" + this.sessionName,
-                hideFromUser: true,
-                iconPath: new vscode.ThemeIcon("device-mobile")
-            };
-            this.scrcpy = this.createTerminal(scrcpyTermOpts);
-        }
-        else
-            this.scrcpy.sendText('\u0003');
-        this.scrcpy.sendText(this.getScrcpyCommand(config.target.udid));
+        await this.ensureScrcpyStarted(config.target.udid);
 
         if (config.resumeProcess) {
             try {
@@ -226,13 +274,27 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     }
 
     protected async attachRequest(response: DebugProtocol.AttachResponse, args: DebugProtocol.AttachRequestArguments, request?: DebugProtocol.Request | undefined): Promise<void> {
-        let pid = this.session.configuration.pid;
+        let config = this.session.configuration;
+        let pid = String(config.pid);
 
-        // Attach to process
-        await this.attachToProcess(pid, response);
+        try {
+            this.configureScrcpy("attach");
+            await this.prepareScrcpyForAttach(config.target.udid);
 
-        // Resume process if applicable
-        await this.resumeProcess(pid);
+            // Attach to process
+            await this.attachToProcess(pid, response);
+
+            // Resume process if applicable
+            if (response.success) {
+                await this.resumeProcess(pid);
+            } else {
+                await this.scrcpy.stop();
+            }
+        } catch (e: any) {
+            await this.scrcpy.stop();
+            response.success = false;
+            response.message = `Error attaching: ${e.message}`;
+        }
 
         this.sendResponse(response);
     }
@@ -243,6 +305,8 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
         let target: Device = config.target;
 
         try {
+            this.configureScrcpy("launch");
+
             // Install the app if required
             if (config.apkPath) {
                 this.consoleLog(`Installing ${config.apkPath}`);
@@ -269,8 +333,10 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
                 }
             }
 
+            let displayId = await this.prepareScrcpyForLaunch(target.udid);
             await android.launchApp(target, config.packageName, config.launchActivity, {
                 waitForDebugger,
+                displayId,
             });
 
             let pid: string | undefined;
@@ -329,9 +395,14 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
             await this.attachToProcess(pid, response);
 
             // Resume process if applicable
-            await this.resumeProcess(pid);
+            if (response.success) {
+                await this.resumeProcess(pid);
+            } else {
+                await this.scrcpy.stop();
+            }
         }
         catch (e: any) {
+            await this.scrcpy.stop();
             response.success = false;
             response.message = `Error launching: ${e.message}`;
         }
@@ -342,11 +413,7 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request | undefined): Promise<void> {
         await Promise.all(Object.values(this.childSessions).map(async (s) => await vscode.debug.stopDebugging(s)));
 
-        if (this.scrcpy) {
-            this.scrcpy.sendText('\u0003');
-            this.scrcpy.dispose();
-            this.scrcpy = undefined;
-        }
+        await this.scrcpy.stop();
 
         if (this.jdwpCleanup) {
             await this.jdwpCleanup();
@@ -362,8 +429,9 @@ class DebugAdapter extends debugadapter.LoggingDebugSession {
             DebugAdapter.terminal!.delete(this.sessionName);
             let session = this.session;
             if (session) {
-                while (session.parentSession !== undefined)
+                while (session.parentSession !== undefined) {
                     session = session.parentSession;
+                }
                 vscode.debug.stopDebugging(session);
             }
             this.terminalWatcher?.dispose();
