@@ -5,6 +5,8 @@ import * as android from './android';
 
 let context: vscode.ExtensionContext;
 
+const LAST_PICKED_TARGET_UDID_KEY = "lastPickedTargetUdid";
+
 export type TargetType = "Device" | "Emulator";
 
 export interface Target extends VerboseDevice {
@@ -19,6 +21,10 @@ interface TargetQuickPickItem extends vscode.QuickPickItem {
 
 // Last successfully picked target
 var lastPickedTarget: Device|undefined;
+
+// Persist just the serial number. Device metadata can change between VS Code
+// sessions, so it is refreshed from ADB before being reused.
+var lastPickedTargetUdid: string|undefined;
 
 // Current target for the debug session being started
 var currentTarget: Device|undefined;
@@ -128,14 +134,20 @@ export async function pickTarget()
 
     logger.log("Picked target", target);
 
-    if (target) { lastPickedTarget = target; }
+    if (target) {
+        lastPickedTarget = target;
+        lastPickedTargetUdid = target.udid;
+        await context.workspaceState.update(LAST_PICKED_TARGET_UDID_KEY, target.udid);
+    }
 
     return target;
 }
 
 // Get the last picked target if still available or pick target.
 export async function getLastOrPickTarget() {
-    if (lastPickedTarget && await android.isDeviceConnected(lastPickedTarget.udid)) {
+    const udid = lastPickedTarget?.udid ?? lastPickedTargetUdid;
+    if (udid && await android.isDeviceConnected(udid)) {
+        lastPickedTarget = await getTargetFromUDID(udid);
         return lastPickedTarget;
     }
 
@@ -171,4 +183,5 @@ export function resetCurrentTarget() {
 export function activate(c: vscode.ExtensionContext)
 {
     context = c;
+    lastPickedTargetUdid = context.workspaceState.get<string>(LAST_PICKED_TARGET_UDID_KEY);
 }

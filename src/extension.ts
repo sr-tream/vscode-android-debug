@@ -22,6 +22,7 @@ export async function activate(context: vscode.ExtensionContext) {
     debugLifecycleManager.activate(context);
 
     context.subscriptions.push(vscode.commands.registerCommand('android-debug.pickAndroidProcess', targetCommand.pickAndroidProcess));
+    context.subscriptions.push(vscode.commands.registerCommand('android-debug.getTargetSerial', targetCommand.getTargetSerial));
     context.subscriptions.push(vscode.commands.registerCommand('android-debug.getBestAbi', targetCommand.getBestAbi));
     context.subscriptions.push(vscode.commands.registerCommand('android-debug.getBestMappedAbi', targetCommand.getBestMappedAbi));
 

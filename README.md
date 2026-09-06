@@ -202,6 +202,24 @@ Here are all the options supported with explanation and example values.
 }
 ```
 
+### Reuse the selected device in VS Code tasks
+
+Use `${command:android-debug.getTargetSerial}` anywhere a VS Code command
+variable is accepted, such as a task input. It returns the serial of the target
+currently being resolved for debugging, or the last selected connected target.
+If neither is available, it shows the extension's normal target picker. The
+last selected serial is retained for the workspace across VS Code reloads.
+
+For example, replace a task input that shells out to `adb devices` with:
+
+```json
+{
+    "id": "AdbDevice",
+    "type": "command",
+    "command": "android-debug.getTargetSerial"
+}
+```
+
 ### scrcpy displays
 
 To launch an app on an existing Android display and mirror that display:

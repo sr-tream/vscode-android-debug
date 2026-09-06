@@ -13,6 +13,7 @@
     ],
     "activationEvents": [
         "onCommand:android-debug.pickAndroidProcess",
+        "onCommand:android-debug.getTargetSerial",
         "onCommand:android-debug.resumeWaitingProcess",
         "onDebugResolve:lldb",
         "onDebugResolve:java",
@@ -23,6 +24,11 @@
     "main": "./out/extension.js",
     "contributes": {
         "commands": [
+            {
+                "command": "android-debug.getTargetSerial",
+                "title": "Get selected target serial",
+                "category": "Android Debug"
+            },
             {
                 "command": "android-debug.resumeWaitingProcess",
                 "title": "Resume process waiting for debugger",

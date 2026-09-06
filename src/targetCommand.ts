@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { logger } from './logger';
 import * as android from './android';
 import { Device } from './commonTypes';
-import { getCurrentOrPickTarget } from './targetPicker';
+import { getCurrentOrPickTarget, getCurrentTarget, getLastOrPickTarget } from './targetPicker';
 
 let context: vscode.ExtensionContext;
 let lldbProcessKillers: {[socket: string]: () => void} = {};
@@ -33,6 +33,14 @@ export function setProcessPickerInfo(packageName: string) {
 
 export function resetProcessPickerInfo() {
     currentPackageName = undefined;
+}
+
+// Intended for use by VS Code task command variables. Prefer the target that
+// is currently being resolved for a debug session; otherwise reuse the last
+// target or show the normal picker when there is no usable previous target.
+export async function getTargetSerial(): Promise<string | undefined> {
+    const device = getCurrentTarget() ?? await getLastOrPickTarget();
+    return device?.udid;
 }
 
 export async function pickAndroidProcess(args: {device: Device}) {
